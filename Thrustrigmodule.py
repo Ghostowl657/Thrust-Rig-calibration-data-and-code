@@ -17,24 +17,11 @@ import matplotlib.pyplot as plt # you need to install this module from the comma
 from time import time,clock,ctime,sleep
 import serial # the serial module needs to be downloaded
 import sys # this might only work on Windows
+import numpy as np
 from msvcrt import getch # get key press, only Windows
 
 
-def loadingbar(s,beginT):
-    """Displays a loading bar while data is being gathered.
-    
-    PreC: s is a string
-    """
-    n = 0
-    interval = clock() - beginT
-    if interval >= 0.5:
-        n = n + 1
-        sys.stdout.write('\r'+s+'.'*n) # see note above about sys module
-        if len(s) >= 35:
-            sys.stdout.write('\r'+s+' '*35)
-
-
-def putSerial(filename,linelength=6,whatdo='a',serial_port='COM4',baud=9600):
+def putSerial(filename,linelength=6,whatdo='r+',serial_port='COM4',baud=9600):
     """[WIP]Interfaces with the Serial port and records the data received in a text file.
     The user can choose which serial port, the baud, the name of the file to save to
     and the length of each line from the serial port. It takes a user input for data cutoff.
@@ -44,43 +31,46 @@ def putSerial(filename,linelength=6,whatdo='a',serial_port='COM4',baud=9600):
     the name string of an existing file. linelength is an int.
     """
     cutoff = raw_input(' Timer, Keypress end, or Number of Data? (T, K, or N): ')
-    #with serial.Serial(serial_port,baud) as port, open(filename,whatdo) as fo:
-        #init = port.read(size=8
-    n = 0; l = 0
-    loadT = clock()
-    if cutoff == 'T':
-        interval = input(' How long in seconds: ')
-        beginT = clock()
-    elif cutoff == 'N':
-        reps = input(' How many data?: ')
-    elif cutoff == 'K':
-        print '\n'+'Press any key to stop'+'\n'
-    else:
-        return False
-    while True:
+    with serial.Serial(serial_port,baud) as port, open(filename,whatdo) as fo:
+        n = 0; l = 0; s = ' Gathering Data'; V = []
         if cutoff == 'T':
-            endT = clock()
-            elapsedT = endT - beginT
-            if elapsedT >= interval:
-                break
+            interval = input(' How long in seconds: ')
+            beginT = clock()
         elif cutoff == 'N':
-            n = n + 1
-            if n >= reps:
-                break
+            reps = input(' How many data?: ')
         elif cutoff == 'K':
-            if getch()!=():
-                for n in (0,3):
-                    sys.stdout.write('\r'+' '*35)
-                break
-        interval = clock() - loadT
-        if interval >= 0.5:
-            l = l + 1
-            sys.stdout.write('\r'+s+'.'*n)
-            if len(s) >= 35:
-                sys.stdout.write('\r'+s+' '*35)
-        #x = port.read(size=6)
-        #fo.writelines(x)
-    #fo.close()
+            print '\n'+'Press any key to stop'+'\n'
+        else:
+            return False        
+        init = port.readline()
+        loadT = clock()
+        while True:
+            if cutoff == 'T':
+                endT = clock()
+                elapsedT = endT - beginT
+                if elapsedT >= interval:
+                    break
+            elif cutoff == 'N':
+                n = n + 1
+                if n >= reps:
+                    break
+            elif cutoff == 'K':
+                if getch()!=():
+                    for n in (0,3):
+                        sys.stdout.write('\r'+' '*35)
+                    break
+            interval = clock() - loadT
+            if interval >= 0.5:
+                l = l + 1
+                sys.stdout.write('\r'+s+'.'*l)
+                loadT = clock()
+                if l >= 35:
+                    sys.stdout.write('\r'+s+' '*35)
+                    l = 0
+            x = port.readline()
+            V = V + [float(x)]
+            fo.writelines(x)
+        fo.close()
     print ' Done'
 
 
@@ -121,12 +111,12 @@ def islist(value):
         return False
 
 
-def getVWData():
+def getVWData(filename):
     """Gets Voltage and Weight lists from Thrustdata.txt
     """
-    fo = open('Thrustdata.txt', 'r')
     V = []
     W = []
+    fo = open(filename, 'r')
     n = 0
     val = 0
     val_meaning = 'Number'
@@ -300,8 +290,8 @@ def MakeWindow(minx,maxx,miny,maxy,labels=True,bgcolor=[1.0,1.0,1.0]):
     """
     plt.figure(figsize=(8,8), dpi=80)
     # Where to put the axis ticks.
-    plt.xticks(np.linspace(int(minx), int(maxx), int(maxx-minx)+1, endpoint=True))
-    plt.yticks(np.linspace(int(minx), int(maxy), int(maxy-miny)+1, endpoint=True))
+    plt.xticks(np.linspace(int(minx), int(maxx), int(maxx-minx+1), endpoint=True))
+    plt.yticks(np.linspace(int(minx), int(maxy), int(maxy-miny+1), endpoint=True))
     # The x and y ranges along the axes.
     plt.xlim(int(minx),int(maxx))
     plt.ylim(int(miny),int(maxy))
@@ -314,7 +304,7 @@ def MakeWindow(minx,maxx,miny,maxy,labels=True,bgcolor=[1.0,1.0,1.0]):
         axes.set_yticks([])
 
 
-def stats(a,b,x,y,function):
+def stats(a,b,x,y,function,d=e):
     """Takes values for a and b and calculates the errors.
     
     PreC: a and b are numbers, x and y are lists, function is 'linear',
@@ -322,37 +312,50 @@ def stats(a,b,x,y,function):
     """
     error = []
     residual = []
+    perp_resid = []
+    xr = []
+    for g in range(5000):
+        xr = xr + [g/1000.]
     if len(x) <= len(y):
         n = len(x)
     else:
         n = len(y)
     for c in range(n):
+        perp = []
         if function == 'linear':
             y_calc = a + b*x[c]
             error = error + [abs((y[c]-y_calc)/y[c])]
             residual = residual + [y[c]-y_calc]
+            for l in range(5000):
+                perp = perp + [sqrt((x[c]-xr[l])**2+(y[c]-(a+b*xr[l]))**2)]
         elif function == 'logarithmic':
             x_calc = a + b*log(y[c])
             error = error + [abs((x[c]-x_calc)/x[c])]
             residual = residual + [x[c]-x_calc]
         elif function == 'exponential':
-            y_calc = a*e**(b*x[c])
+            y_calc = a*d**(b*x[c])
             error = error + [abs((y[c]-y_calc)/y[c])]
             residual = residual + [y[c]-y_calc]
+            for l in range(5000):
+                perp = perp + [sqrt((x[c]-xr[l])**2+(y[c]-a*e**(b*xr[l]))**2)]
+        # MakeWindow(0,5,0,max(perp)+1)
+        # plt.scatter(xr,perp)
+        perp_resid = perp_resid + [(residual[c]/abs(residual[c]))*min(perp)]
     av_err = sum(error)/len(error)
-    # the following lines are commented out, but plot the residuals of the approximate function
-    #
-    # if function == 'logarithmic':
-    #   x1 = residual
-    #   residual = x
-    #   x = x1
+    if function == 'logarithmic':
+      x1 = residual
+      residual = x
+      x = x1
     # MakeWindow(min(x)-2,max(x)+2,min(y)-2,max(y)+2)
     # plt.scatter(x,y)
     # MakeWindow(min(x)-2,max(x)+2,min(residual)-2,max(residual)+2)
     # plt.plot([0,7],[0,0],linewidth=1,color=[0,0,0])
     # plt.scatter(x,residual)
+    # MakeWindow(0,5,-1,1)
+    # plt.plot([0,7],[0,0],linewidth=1,color=[0,0,0])
+    # plt.scatter(x,perp_resid)
     # plt.show()
-    return (av_err,error,residual)
+    return (av_err,error,residual,perp_resid)
 
 
 def PrintStuff(function,V,W):
